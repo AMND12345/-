@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mrs. GREEN APPLE お喋りサイト</title>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <style>
+        :root {
+            --bg-color: #dfffaf;
+            --main-green: #7cfc00;
+            --accent-blue: #00bfff;
+            --white: #ffffff;
+            --my-msg-color: #98fb98;
+        }
+
+        body { background-color: var(--bg-color); font-family: sans-serif; margin: 0; color: #333; }
+        .page { display: none; flex-direction: column; align-items: center; min-height: 100vh; width: 100%; }
+        .active { display: flex; }
+
+        header { width: 100%; padding: 20px; background: white; text-align: center; position: relative; box-shadow: 0 2px 10px rgba(0,0,0,0.1); box-sizing: border-box; }
+        .account-btn { position: absolute; right: 20px; top: 20px; font-size: 30px; cursor: pointer; }
+
+        .btn { background: var(--accent-blue); color: white; border: none; padding: 12px 25px; border-radius: 50px; font-weight: bold; cursor: pointer; font-size: 18px; margin: 10px; }
+        input, textarea { width: 80%; padding: 15px; margin: 10px; border-radius: 10px; border: 1px solid #ddd; font-size: 18px; }
+
+        .thread-card { background: white; width: 90%; max-width: 500px; padding: 20px; margin: 10px; border-radius: 15px; border-left: 10px solid var(--main-green); cursor: pointer; box-sizing: border-box; }
+
+        #messageList { flex: 1; width: 100%; max-width: 600px; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; box-sizing: border-box; }
+        
+        .msg-container { display: flex; align-items: flex-start; margin-bottom: 15px; width: 100%; }
+        .msg-container.mine { flex-direction: row-reverse; }
+
+        .icon { width: 45px; height: 45px; border-radius: 50%; background: #ccc; margin: 0 10px; object-fit: cover; cursor: pointer; transition: transform 0.2s; }
+        .icon:hover { transform: scale(1.1); }
+        .msg-content { display: flex; flex-direction: column; max-width: 70%; }
+        .mine .msg-content { align-items: flex-end; }
+
+        .user-name { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .bubble { padding: 10px 15px; border-radius: 18px; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); line-height: 1.4; word-break: break-all; }
+        .mine .bubble { background: var(--my-msg-color); }
+
+        /* プロフィール確認用ポップアップ */
+        #userPopup { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 20px; box-shadow: 0 0 20px rgba(0,0,0,0.2); z-index: 100; width: 80%; max-width: 300px; text-align: center; display: none; }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="overlay" class="overlay" onclick="closePopup()"></div>
+    <div id="userPopup">
+        <img id="popIcon" src="" style="width:80px; height:80px; border-radius:50%; margin-bottom:10px;">
+        <h3 id="popName" style="margin:5px 0;"></h3>
+        <p id="popBio" style="font-size:14px; color:#666;"></p>
+        <button class="btn" style="font-size:14px; padding:8px 20px;" onclick="closePopup()">閉じる</button>
+    </div>
+
+    <div id="homePage" class="page active">
+        <header>
+            <div class="account-btn" onclick="showPage('profilePage')">👤</div>
+            <h1 style="font-size: 22px;">🍏 Mrs. GREEN APPLEのお喋り場</h1>
+            <p style="font-size: 14px;">ここはミセスの好きな事を喋る事ができるよ！<br>
+               スレッドを立てると3時間お喋りできるよ！</p>
+        </header>
+        <button class="btn" onclick="showPage('createPage')">＋ スレッドを立てる</button>
+        <div id="threadList" style="width: 100%; display: flex; flex-direction: column; align-items: center;"></div>
+    </div>
+
+    <div id="createPage" class="page" style="background: white;">
+        <h2>スレッドを作る</h2>
+        <input type="text" id="newThreadTitle" placeholder="スレッド名">
+        <input type="password" id="newThreadPass" placeholder="パスワード（任意）">
+        <button class="btn" onclick="createThread()">作成</button>
+        <button onclick="showPage('homePage')">戻る</button>
+    </div>
+
+    <div id="profilePage" class="page" style="background: white; padding-top: 20px;">
+        <h2>プロフィール</h2>
+        <input type="text" id="userName" placeholder="名前">
+        <input type="text" id="userIcon" placeholder="アイコン画像のURL">
+        <textarea id="userBio" placeholder="自己紹介"></textarea>
+        <button class="btn" onclick="saveProfile()">保存して戻る</button>
+    </div>
+
+    <div id="chatPage" class="page" style="background: #f0f0f0;">
+        <header style="padding:10px;">
+            <button onclick="exitThread()" style="position:absolute; left:10px; top:15px;">←</button>
+            <h2 id="chatTitle" style="margin:0; font-size:18px;"></h2>
+        </header>
+        <div id="messageList"></div>
+        <div style="width: 100%; background: white; padding: 10px; display: flex; box-sizing: border-box; align-items: center;">
+            <input type="text" id="chatInput" placeholder="メッセージを入力...">
+            <button class="btn" onclick="sendMessage()" style="margin:0 0 0 10px; padding:10px;">送信</button>
+        </div>
+    </div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyDsfU-VtohRC40oTB5lchHuGe40YW0MhWI",
+        databaseURL: "https://mga123456-43be4-default-rtdb.asia-southeast1.firebasedatabase.app/",
+        projectId: "mga123456-43be4"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    let myInfo = { 
+        name: localStorage.getItem('mga_name') || "ミセス大好き", 
+        icon: localStorage.getItem('mga_icon') || "https://via.placeholder.com/100?text=Apple",
+        bio: localStorage.getItem('mga_bio') || "ミセス大好きです！"
+    };
+    let currentThreadId = null;
+
+    function showPage(pageId) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById(pageId).classList.add('active');
+        if(pageId === 'profilePage'){
+            document.getElementById('userName').value = myInfo.name;
+            document.getElementById('userIcon').value = myInfo.icon;
+            document.getElementById('userBio').value = myInfo.bio;
+        }
+    }
+
+    function saveProfile() {
+        myInfo.name = document.getElementById('userName').value.trim() || "ミセス大好き";
+        myInfo.icon = document.getElementById('userIcon').value.trim() || "https://via.placeholder.com/100?text=Apple";
+        myInfo.bio = document.getElementById('userBio').value.trim() || "ミセス大好きです！";
+        localStorage.setItem('mga_name', myInfo.name);
+        localStorage.setItem('mga_icon', myInfo.icon);
+        localStorage.setItem('mga_bio', myInfo.bio);
+        showPage('homePage');
+    }
+
+    function createThread() {
+        const title = document.getElementById('newThreadTitle').value;
+        const pass = document.getElementById('newThreadPass').value;
+        if(!title) return alert("名前を入れてね");
+        database.ref('threads').push({ title, pass, lastActive: Date.now() });
+        showPage('homePage');
+    }
+
+    database.ref('threads').on('value', (snapshot) => {
+        const list = document.getElementById('threadList');
+        list.innerHTML = "";
+        snapshot.forEach(child => {
+            const t = child.val();
+            const id = child.key;
+            if (Date.now() - t.lastActive > 10800000) return database.ref('threads/'+id).remove();
+            const card = document.createElement('div');
+            card.className = "thread-card";
+            card.innerHTML = `<strong>${t.pass ? '🔒' : '🍏'} ${t.title}</strong>`;
+            card.onclick = () => enterThread(id, t);
+            list.appendChild(card);
+        });
+    });
+
+    function enterThread(id, t) {
+        if(t.pass && prompt("パスワード") !== t.pass) return alert("違うよ");
+        currentThreadId = id;
+        document.getElementById('chatTitle').innerText = t.title;
+        renderMessages(id);
+        showPage('chatPage');
+    }
+
+    function exitThread() {
+        database.ref('messages/' + currentThreadId).off();
+        showPage('homePage');
+    }
+
+    function sendMessage() {
+        const input = document.getElementById('chatInput');
+        if(!input.value) return;
+        database.ref('messages/' + currentThreadId).push({
+            text: input.value,
+            sender: myInfo.name,
+            icon: myInfo.icon,
+            bio: myInfo.bio, // ここで自分の自己紹介も一緒に送る
+            timestamp: Date.now()
+        });
+        database.ref('threads/' + currentThreadId).update({ lastActive: Date.now() });
+        input.value = "";
+    }
+
+    function renderMessages(id) {
+        const list = document.getElementById('messageList');
+        database.ref('messages/' + id).on('value', (snapshot) => {
+            list.innerHTML = "";
+            snapshot.forEach(child => {
+                const m = child.val();
+                const isMine = m.sender === myInfo.name;
+                const container = document.createElement('div');
+                container.className = `msg-container ${isMine ? 'mine' : ''}`;
+                container.innerHTML = `
+                    <img src="${m.icon}" class="icon" onclick="openPopup('${m.sender}', '${m.icon}', '${m.bio || ""}')">
+                    <div class="msg-content">
+                        <span class="user-name">${m.sender}</span>
+                        <div class="bubble">${m.text}</div>
+                    </div>
+                `;
+                list.appendChild(container);
+            });
+            list.scrollTop = list.scrollHeight;
+        });
+    }
+
+    // 相手のプロフィールを表示する関数
+    function openPopup(name, icon, bio) {
+        document.getElementById('popName').innerText = name;
+        document.getElementById('popIcon').src = icon;
+        document.getElementById('popBio').innerText = bio || "自己紹介はありません";
+        document.getElementById('userPopup').style.display = 'block';
+        document.getElementById('overlay').style.display = 'block';
+    }
+
+    function closePopup() {
+        document.getElementById('userPopup').style.display = 'none';
+        document.getElementById('overlay').style.display = 'none';
+    }
+</script>
+</body>
+</html>
